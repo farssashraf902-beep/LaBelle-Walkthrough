@@ -1,0 +1,155 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>La Belle | Virtual Walkthrough</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#15131a;color:white;font-family:Arial,sans-serif;overflow:hidden}
+#status{position:fixed;top:18px;left:18px;z-index:3;background:#15131acc;padding:13px;border-radius:9px;max-width:80%}
+#start{position:fixed;left:50%;bottom:25px;transform:translateX(-50%);z-index:4;background:#d63886;color:white;border:0;border-radius:25px;padding:15px 25px;font-weight:bold;cursor:pointer}
+#hint{position:fixed;bottom:85px;left:0;width:100%;text-align:center;pointer-events:none;font-size:13px;text-shadow:0 1px 4px black}
+#crosshair{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none}
+#mobile{position:fixed;bottom:25px;left:15px;z-index:3;display:none;gap:8px}
+#mobile button{padding:15px;background:#222a;color:white;border:1px solid #fff5;border-radius:12px;touch-action:none}
+@media(pointer:coarse){#mobile{display:flex}}
+</style>
+</head>
+<body>
+<div id="status">La Belle — Loading model...</div>
+<div id="crosshair">+</div>
+<div id="hint">W A S D to walk · Mouse to look · Shift to move faster · ESC to release mouse</div>
+<button id="start">ENTER WALKTHROUGH</button>
+<div id="mobile">
+<button data-key="KeyW">▲</button>
+<button data-key="KeyA">◀</button>
+<button data-key="KeyS">▼</button>
+<button data-key="KeyD">▶</button>
+</div>
+
+<script type="module">
+import * as THREE from "https://esm.sh/three@0.164.1";
+import {GLTFLoader} from "https://esm.sh/three@0.164.1/addons/loaders/GLTFLoader.js";
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x29252c);
+
+const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.03,3000);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xffffff,0x777777,2));
+const light=new THREE.DirectionalLight(0xffffff,2);
+light.position.set(10,20,10);
+scene.add(light);
+
+const status=document.getElementById("status");
+const start=document.getElementById("start");
+const keys={};
+let yaw=0,pitch=0,ready=false;
+const clock=new THREE.Clock();
+
+new GLTFLoader().load(
+ "./labelle.glb",
+ gltf=>{
+  const model=gltf.scene;
+  scene.add(model);
+  model.updateMatrixWorld(true);
+  const box=new THREE.Box3().setFromObject(model);
+  const center=box.getCenter(new THREE.Vector3());
+  const size=box.getSize(new THREE.Vector3());
+  // GLB uses Y as the vertical axis.
+  // Start near the model center for a first test.
+  camera.position.set(center.x,box.min.y+1.6,center.z);
+  camera.rotation.order="YXZ";
+  camera.rotation.set(0,0,0);
+  ready=true;
+  status.textContent="Model loaded — Click Enter Walkthrough";
+  console.log("Model bounds",box.min,box.max,"Size",size);
+ },
+ xhr=>{
+  if(xhr.total)status.textContent="Loading: "+Math.round(xhr.loaded/xhr.total*100)+"%";
+  else status.textContent="Loading model...";
+ },
+ err=>{
+  status.textContent="Model loading failed. Check labelle.glb and hosting.";
+  console.error(err);
+ }
+);
+
+start.onclick=()=>{
+ if(!ready)return;
+ if(matchMedia("(pointer:coarse)").matches){
+  start.style.display="none";
+ }else{
+  renderer.domElement.requestPointerLock();
+ }
+};
+
+document.addEventListener("pointerlockchange",()=>{
+ start.style.display=document.pointerLockElement?"none":"block";
+});
+document.addEventListener("mousemove",e=>{
+ if(document.pointerLockElement!==renderer.domElement)return;
+ yaw-=e.movementX*0.002;
+ pitch-=e.movementY*0.002;
+ pitch=THREE.MathUtils.clamp(pitch,-1.5,1.5);
+});
+document.addEventListener("keydown",e=>keys[e.code]=true);
+document.addEventListener("keyup",e=>keys[e.code]=false);
+
+document.querySelectorAll("#mobile button").forEach(b=>{
+ b.addEventListener("pointerdown",e=>{e.preventDefault();keys[b.dataset.key]=true;b.setPointerCapture(e.pointerId)});
+ for(const type of ["pointerup","pointercancel","lostpointercapture"])
+  b.addEventListener(type,()=>keys[b.dataset.key]=false);
+});
+
+let lastTouch=null;
+renderer.domElement.addEventListener("touchstart",e=>{
+ lastTouch={x:e.touches[0].clientX,y:e.touches[0].clientY};
+},{passive:true});
+renderer.domElement.addEventListener("touchmove",e=>{
+ if(!lastTouch)return;
+ const t=e.touches[0];
+ yaw-=(t.clientX-lastTouch.x)*0.005;
+ pitch-=(t.clientY-lastTouch.y)*0.005;
+ pitch=THREE.MathUtils.clamp(pitch,-1.5,1.5);
+ lastTouch={x:t.clientX,y:t.clientY};
+},{passive:true});
+renderer.domElement.addEventListener("touchend",()=>lastTouch=null);
+
+function animate(){
+ requestAnimationFrame(animate);
+ const dt=Math.min(clock.getDelta(),0.05);
+ camera.rotation.set(pitch,yaw,0,"YXZ");
+ if(ready){
+  const forward=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+  const right=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+  const move=new THREE.Vector3();
+  if(keys.KeyW)move.add(forward);
+  if(keys.KeyS)move.sub(forward);
+  if(keys.KeyD)move.add(right);
+  if(keys.KeyA)move.sub(right);
+  if(move.lengthSq()>0){
+   move.normalize().multiplyScalar(dt*(keys.ShiftLeft?5:1.8));
+   camera.position.add(move);
+  }
+ }
+ renderer.render(scene,camera);
+}
+animate();
+
+addEventListener("resize",()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
